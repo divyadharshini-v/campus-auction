@@ -37,13 +37,26 @@ const auth = (req, res, next) => {
   if (!u) return fail(res, 'Please log in', 401); req.user = u; next();
 };
 
-app.post('/api/login', (req, res) => {
-  const name = String(req.body.name || '').trim().slice(0, 40); if (!name) return fail(res, 'Name required');
-  let u = db.prepare('SELECT * FROM users WHERE name=?').get(name);
-  if (u) return fail(res, 'That name is taken (v0 has no passwords; pick another)', 409);
-  const token = crypto.randomBytes(16).toString('hex');
-  const id = db.prepare('INSERT INTO users(name,token) VALUES(?,?)').run(name, token).lastInsertRowid;
+for (const c of ['pw_hash TEXT', 'pw_salt TEXT']) { try { db.exec('ALTER TABLE users ADD COLUMN ' + c); } catch {} }
+const hash = (pw, salt) => crypto.scryptSync(pw, salt, 64).toString('hex');
+const session = u => ({ id: u.id, name: u.name, token: u.token });
+app.post('/api/register', (req, res) => {
+  const name = String(req.body.name || '').trim(), pw = String(req.body.password || '');
+  if (!/^[\w .-]{3,30}$/.test(name)) return fail(res, 'Username: 3-30 letters, numbers, spaces, . _ -');
+  if (pw.length < 6) return fail(res, 'Password must be at least 6 characters');
+  if (db.prepare('SELECT 1 FROM users WHERE name=? COLLATE NOCASE').get(name)) return fail(res, 'That username is taken', 409);
+  const salt = crypto.randomBytes(16).toString('hex'), token = crypto.randomBytes(24).toString('hex');
+  const id = db.prepare('INSERT INTO users(name,token,pw_hash,pw_salt) VALUES(?,?,?,?)').run(name, token, hash(pw, salt), salt).lastInsertRowid;
   ok(res, { id, name, token });
+});
+app.post('/api/login', (req, res) => {
+  const u = db.prepare('SELECT * FROM users WHERE name=? COLLATE NOCASE').get(String(req.body.name || '').trim());
+  const bad = () => fail(res, 'Wrong username or password', 401);
+  if (!u || !u.pw_hash) return bad();
+  const a = Buffer.from(hash(String(req.body.password || ''), u.pw_salt), 'hex'), b = Buffer.from(u.pw_hash, 'hex');
+  if (!crypto.timingSafeEqual(a, b)) return bad();
+  const token = crypto.randomBytes(24).toString('hex'); db.prepare('UPDATE users SET token=? WHERE id=?').run(token, u.id);
+  ok(res, session({ ...u, token }));
 });
 app.post('/api/relogin', (req, res) => {
   const u = db.prepare('SELECT id,name FROM users WHERE token=?').get(req.body.token || ''); u ? ok(res, u) : fail(res, 'bad token', 401);

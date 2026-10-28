@@ -18,7 +18,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px;bord
 #err{color:var(--er);min-height:20px}.imgs img{height:160px;border-radius:6px;margin-right:6px}
 </style></head><body>
 <header><b>🎓 Campus Auction</b><a onclick="go('browse')">Browse</a><a onclick="go('sell')">Sell</a><a onclick="go('mine')">My listings</a>
-<a onclick="go('alerts')">🔔 <span id="bell">0</span></a><span style="flex:1"></span><span id="who" class="mu"></span></header>
+<a onclick="go('alerts')">🔔 <span id="bell">0</span></a><span style="flex:1"></span><span id="who" class="mu"></span><a onclick="logout()">Log out</a></header>
 <main id="app"></main><div style="text-align:center;padding:8px" id="err"></div>
 <script>
 const $=s=>document.querySelector(s), app=$('#app'); let me=null, skew=0, ticker=null, seen=new Set(), first=true;
@@ -32,11 +32,23 @@ const fmt=ms=>{if(ms<=0)return'Closed';const s=Math.floor(ms/1e3),d=Math.floor(s
  return d?`${d}d ${h}h ${m}m`:h?`${h}h ${m}m ${s%60}s`:`${m}m ${s%60}s`};
 const price=i=>i.current??i.start_price, left=i=>i.closes_at-(Date.now()+skew);
 function tick(){document.querySelectorAll('[data-close]').forEach(e=>e.textContent=fmt(+e.dataset.close-(Date.now()+skew)))}
-async function login(){const name=prompt('Pick a display name (visible to everyone):');if(!name)return;
- try{const u=await api('/login',{body:{name}});localStorage.token=u.token;me=u;init()}catch(e){err(e);login()}}
+let pollTimer=null;
+function logout(){delete localStorage.token;me=null;seen=new Set();first=true;clearInterval(pollTimer);pollTimer=null;login()}
+function login(mode='in'){
+ document.querySelector('header').style.display='none';const reg=mode==='up';
+ app.innerHTML=`<form class="box" id="lf" style="max-width:360px;margin:60px auto"><h2 style="margin-top:0">🎓 Campus Auction</h2>
+ <p class="mu">${reg?'Create your account to bid and sell.':'Log in to bid and sell.'}</p>
+ <label>Username</label><input name="name" required autocomplete="username" autofocus>
+ <label>Password</label><input name="password" type="password" required minlength="${reg?6:1}" autocomplete="${reg?'new-password':'current-password'}">
+ ${reg?'<label>Confirm password</label><input name="confirm" type="password" required autocomplete="new-password">':''}
+ <p id="lerr" style="color:var(--er);min-height:18px;margin:8px 0"></p><button style="width:100%">${reg?'Sign up':'Log in'}</button>
+ <p class="mu" style="text-align:center">${reg?'Have an account?':'New here?'} <a onclick="login('${reg?'in':'up'}')">${reg?'Log in':'Create an account'}</a></p></form>`;
+ $('#lf').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));
+  if(reg&&f.password!==f.confirm)return $('#lerr').textContent='Passwords do not match';
+  try{const u=await api(reg?'/register':'/login',{body:f});localStorage.token=u.token;init()}catch(x){$('#lerr').textContent=x.message}}}
 async function init(){if(!localStorage.token)return login();
  try{me=await api('/relogin',{body:{token:localStorage.token}})}catch{delete localStorage.token;return login()}
- $('#who').textContent='Signed in as '+me.name;route();pollAlerts();setInterval(pollAlerts,3000);clearInterval(ticker);ticker=setInterval(tick,500)}
+ document.querySelector('header').style.display='flex';$('#who').textContent='Signed in as '+me.name;route();pollAlerts();if(!pollTimer)pollTimer=setInterval(pollAlerts,3000);clearInterval(ticker);ticker=setInterval(tick,500)}
 function go(v,id){location.hash=id?v+'/'+id:v}addEventListener('hashchange',()=>me&&route());
 function route(){const[v,id]=(location.hash.slice(1)||'browse').split('/');
  ({browse,mine:()=>browse(true),sell:()=>sell(),edit:()=>sell(id),item:()=>item(id),alerts})[v]?.(); if(v==='browse')browse()}
