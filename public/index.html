@@ -1,0 +1,91 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Campus Auction</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mu:#667;--ac:#1a6b4f;--bd:#dde1e6;--er:#b3261e;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--card:#1d2125;--tx:#e8eaed;--mu:#9aa3ad;--ac:#4cc39a;--bd:#2f353b;--er:#f2a29c}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;gap:14px;align-items:center;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--bd);flex-wrap:wrap}
+header b{font-size:18px;color:var(--ac)}a,.link{color:var(--ac);cursor:pointer;text-decoration:none}main{max-width:1000px;margin:20px auto;padding:0 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+.card,.box{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px}.card{cursor:pointer}
+.card img,.ph{width:100%;height:130px;object-fit:cover;border-radius:6px;background:var(--bd)}
+input,select,textarea,button{font:inherit;padding:7px 9px;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--tx)}
+button{background:var(--ac);color:#fff;border:0;cursor:pointer}button.sec{background:none;color:var(--ac);border:1px solid var(--ac)}button.bad{background:var(--er);color:#fff}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.mu{color:var(--mu);font-size:13px}.big{font-size:26px;font-weight:700}
+.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--bd);color:var(--mu)}
+form label{display:block;margin:8px 0 3px;font-size:13px;color:var(--mu)}form input,form select,form textarea{width:100%}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px;border-bottom:1px solid var(--bd)}
+#err{color:var(--er);min-height:20px}.imgs img{height:160px;border-radius:6px;margin-right:6px}
+</style></head><body>
+<header><b>🎓 Campus Auction</b><a onclick="go('browse')">Browse</a><a onclick="go('sell')">Sell</a><a onclick="go('mine')">My listings</a>
+<a onclick="go('alerts')">🔔 <span id="bell">0</span></a><span style="flex:1"></span><span id="who" class="mu"></span></header>
+<main id="app"></main><div style="text-align:center;padding:8px" id="err"></div>
+<script>
+const $=s=>document.querySelector(s), app=$('#app'); let me=null, skew=0, ticker=null, seen=new Set(), first=true;
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cats=['Cycle','Calculator','Books','Electronics','Furniture','Other'], conds=['New','Like new','Good','Fair','Worn'];
+const LABEL={active:'Open',unsold:'Unsold',pending_approval:'Awaiting seller approval',approved:'Reserved for winner',rejected:'Price rejected',cancelled:'Cancelled',sold:'Sold',failed_pickup:'Failed pickup'};
+async function api(p,o={}){const r=await fetch('/api'+p,{method:o.method||(o.body?'POST':'GET'),headers:{'Content-Type':'application/json','x-token':localStorage.token||''},body:o.body&&JSON.stringify(o.body)});
+ const d=await r.json();if(!r.ok)throw new Error(d.error||'Error');return d}
+const err=e=>{$('#err').textContent=e.message||e;setTimeout(()=>$('#err').textContent='',4000)};
+const fmt=ms=>{if(ms<=0)return'Closed';const s=Math.floor(ms/1e3),d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+ return d?`${d}d ${h}h ${m}m`:h?`${h}h ${m}m ${s%60}s`:`${m}m ${s%60}s`};
+const price=i=>i.current??i.start_price, left=i=>i.closes_at-(Date.now()+skew);
+function tick(){document.querySelectorAll('[data-close]').forEach(e=>e.textContent=fmt(+e.dataset.close-(Date.now()+skew)))}
+async function login(){const name=prompt('Pick a display name (visible to everyone):');if(!name)return;
+ try{const u=await api('/login',{body:{name}});localStorage.token=u.token;me=u;init()}catch(e){err(e);login()}}
+async function init(){if(!localStorage.token)return login();
+ try{me=await api('/relogin',{body:{token:localStorage.token}})}catch{delete localStorage.token;return login()}
+ $('#who').textContent='Signed in as '+me.name;route();pollAlerts();setInterval(pollAlerts,3000);clearInterval(ticker);ticker=setInterval(tick,500)}
+function go(v,id){location.hash=id?v+'/'+id:v}addEventListener('hashchange',()=>me&&route());
+function route(){const[v,id]=(location.hash.slice(1)||'browse').split('/');
+ ({browse,mine:()=>browse(true),sell:()=>sell(),edit:()=>sell(id),item:()=>item(id),alerts})[v]?.(); if(v==='browse')browse()}
+function cardHtml(i){return`<div class="card" onclick="go('item',${i.id})">${i.photos[0]?`<img src="${i.photos[0]}">`:'<div class="ph"></div>'}
+ <div><b>${esc(i.title)}</b></div><div class="mu">${esc(i.category)} · ${esc(i.condition)}</div>
+ <div class="big">₹${price(i)}</div><div class="mu">${i.bid_count} bids · ${i.status==='active'?`⏱ <span data-close="${i.closes_at}">${fmt(left(i))}</span>`:LABEL[i.status]}</div></div>`}
+async function browse(mineOnly){
+ if(location.hash.startsWith('#mine'))mineOnly=true;
+ app.innerHTML=`<div class="row"><input id="q" placeholder="Search…"><select id="cat"><option value="">Any category</option>${cats.map(c=>`<option>${c}</option>`)}</select>
+ <select id="cond"><option value="">Any condition</option>${conds.map(c=>`<option>${c}</option>`)}</select><input id="min" type="number" placeholder="Min ₹" style="width:90px">
+ <input id="max" type="number" placeholder="Max ₹" style="width:90px"><label><input type="checkbox" id="cl"> Closing soon (24h)</label></div><div class="grid" id="list"></div>`;
+ const load=async()=>{const p=new URLSearchParams({q:$('#q').value,category:$('#cat').value,condition:$('#cond').value,min:$('#min').value,max:$('#max').value});
+  if($('#cl').checked)p.set('closing',1);if(mineOnly)p.set('seller',1);
+  try{const d=await api('/items?'+p);skew=d.now-Date.now();$('#list').innerHTML=d.items.map(cardHtml).join('')||'<p class="mu">Nothing here yet.</p>'}catch(e){err(e)}};
+ app.querySelectorAll('input,select').forEach(e=>e.oninput=load);load()}
+async function item(id){
+ try{const d=await api('/items/'+id);skew=d.now-Date.now();const i=d.item,mineI=i.seller_id===me.id,open=i.status==='active',min=i.current?i.current+i.min_inc:i.start_price;
+ app.innerHTML=`<div class="box"><div class="imgs">${i.photos.map(p=>`<img src="${p}">`).join('')}</div><h2>${esc(i.title)} <span class="tag">${LABEL[i.status]}</span></h2>
+ <div class="mu">${esc(i.category)} · ${esc(i.condition)} · seller ${esc(i.seller)}</div><p>${esc(i.description)}</p>
+ <div class="big">₹${price(i)} <span class="mu">${i.current?'leading: '+esc(i.leader):'starting price'}</span></div>
+ <div>${open?`⏱ closes in <b data-close="${i.closes_at}">${fmt(left(i))}</b>`:`Closed${i.winner?` · winner ${esc(i.winner)} at ₹${i.final_price}`:''}`}</div>
+ ${open&&!mineI?`<div class="row" style="margin-top:12px"><input id="amt" type="number" value="${min}" min="${min}"><button onclick="bid(${i.id})">Place bid</button><span class="mu">Min ₹${min} (increment ₹${i.min_inc})</span></div>`:''}
+ <div class="row" style="margin-top:12px">${mineI&&open?`${d.bids.length?'':`<button class="sec" onclick="go('edit',${i.id})">Edit</button>`}<button class="bad" onclick="act(${i.id},'cancel')">Cancel listing</button>`:''}
+ ${mineI&&i.status==='pending_approval'?`<button onclick="act(${i.id},'decision',{approve:true})">Approve ₹${i.final_price}</button><button class="bad" onclick="act(${i.id},'decision',{approve:false})">Reject</button>`:''}
+ ${mineI&&i.status==='approved'?`<button onclick="act(${i.id},'handover',{success:true})">Confirm handover</button><button class="bad" onclick="act(${i.id},'handover',{success:false})">Pickup failed</button>`:''}</div></div>
+ <h3>Bid history (public)</h3><div class="box"><table><tr><th>Bidder</th><th>Amount</th><th>Time</th></tr>${d.bids.map(b=>`<tr><td>${esc(b.bidder)}</td><td>₹${b.amount}</td><td class="mu">${new Date(b.created_at).toLocaleString()}</td></tr>`).join('')||'<tr><td colspan=3 class="mu">No bids yet</td></tr>'}</table></div>`}catch(e){err(e)}}
+async function bid(id){try{await api(`/items/${id}/bid`,{body:{amount:$('#amt').value}});item(id)}catch(e){err(e);item(id)}}
+async function act(id,a,body={}){if(a==='cancel'&&!confirm('Cancel this listing?'))return;try{await api(`/items/${id}/${a}`,{body});item(id)}catch(e){err(e)}}
+async function sell(id){let it={title:'',category:'Cycle',condition:'Good',description:'',start_price:'',min_inc:50,photos:[],closes_at:Date.now()+864e5};
+ if(id)it=(await api('/items/'+id)).item;const dt=new Date(it.closes_at-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,16);let photos=[...it.photos];
+ app.innerHTML=`<form class="box" id="f"><h2>${id?'Edit':'New'} listing</h2><label>Title</label><input name="title" required value="${esc(it.title)}">
+ <label>Category</label><select name="category">${cats.map(c=>`<option ${c===it.category?'selected':''}>${c}</option>`)}</select>
+ <label>Condition</label><select name="condition">${conds.map(c=>`<option ${c===it.condition?'selected':''}>${c}</option>`)}</select>
+ <label>Description</label><textarea name="description" rows="3">${esc(it.description)}</textarea>
+ <label>Starting price (₹)</label><input name="start_price" type="number" min="1" required value="${it.start_price}">
+ <label>Minimum increment (₹)</label><input name="min_inc" type="number" min="1" required value="${it.min_inc}">
+ <label>Closes at</label><input name="closes" type="datetime-local" required value="${dt}">
+ <label>Photos (up to 4)</label><input type="file" id="ph" accept="image/*" multiple><div id="pv" class="imgs"></div><br><button>${id?'Save':'Publish'}</button></form>`;
+ const pv=()=>$('#pv').innerHTML=photos.map(p=>`<img src="${p}">`).join('');pv();
+ $('#ph').onchange=async e=>{photos=[];for(const f of [...e.target.files].slice(0,4))photos.push(await shrink(f));pv()};
+ $('#f').onsubmit=async e=>{e.preventDefault();const f=Object.fromEntries(new FormData(e.target));f.closes_at=new Date(f.closes).getTime();f.photos=photos;
+  try{const r=id?await api('/items/'+id,{method:'PUT',body:f}):await api('/items',{body:f});go('item',id||r.id)}catch(x){err(x)}}}
+function shrink(file){return new Promise(r=>{const img=new Image();img.onload=()=>{const k=Math.min(1,800/Math.max(img.width,img.height)),c=document.createElement('canvas');
+ c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.75))};img.src=URL.createObjectURL(file)})}
+async function alerts(){const n=await api('/notifications');
+ if('Notification' in window&&Notification.permission==='default')app.innerHTML=`<button onclick="Notification.requestPermission().then(alerts)">Enable browser notifications</button>`;else app.innerHTML='';
+ app.innerHTML+=`<h2>Alerts</h2>`+(n.map(x=>`<div class="box" style="margin-bottom:8px;cursor:pointer;${x.read?'opacity:.6':''}" onclick="go('item',${x.item_id})">${esc(x.message)}<div class="mu">${new Date(x.created_at).toLocaleString()}</div></div>`).join('')||'<p class="mu">No alerts yet.</p>');
+ await api('/notifications/read',{method:'POST',body:{}});}
+async function pollAlerts(){try{const n=await api('/notifications');$('#bell').textContent=n.filter(x=>!x.read).length;
+ for(const x of n){if(!seen.has(x.id)){seen.add(x.id);if(!first&&!x.read&&'Notification' in window&&Notification.permission==='granted')new Notification('Campus Auction',{body:x.message})}}first=false}catch{}}
+init();
+</script></body></html>
